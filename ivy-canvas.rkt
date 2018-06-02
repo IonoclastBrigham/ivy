@@ -1,6 +1,6 @@
 #lang racket
-;
-;
+; ivy-canvast.rkt
+; main image canvas class for ivy, the taggable image viewer
 (require (only-in plot/utils
                   clamp-real
                   ivl)
@@ -114,11 +114,11 @@
         [(wheel-down)
          ; do nothing if we've pressed ctrl+n
          (unless (equal? (image-path) +root-path+)
-           (send this zoom-by -0.05))]
+           (send this zoom-by -0.05 #t))]
         [(wheel-up)
          ; do nothing if we've pressed ctrl+n
          (unless (equal? (image-path) +root-path+)
-           (send this zoom-by 0.05))]
+           (send this zoom-by 0.05 #t))]
         ; osx does things a little different
         [(f11) (unless macosx?
                  (toggle-fullscreen this))]
@@ -134,7 +134,12 @@
                (insert-tag-tfield-comma)]
         [(#\return) (focus-tag-tfield)]))
 
-    (define/private (configure-scrollbars zoom-factor)
+    (define/private (configure-scrollbars old-zoom-factor zoom-factor track-mouse?)
+      ;; What this is MEANT to be doing:
+      ;; 1. figure out the virtual coords of the pixel that was under the mouse pointer
+      ;; 2. figure out where it moved to, after the zoom occurred
+      ;; 3. nudge the scollbars so it's back under the mouse pointer again
+      (define-values [start-x start-y] (send this get-view-start))
       (let* ([img-w (send image-bmp-master get-width)]
              [img-h (send image-bmp-master get-height)]
              [zoomed-img-w (inexact->exact (round (* img-w zoom-factor)))]
@@ -143,20 +148,40 @@
              [client-h (send this get-height)]
              [virtual-w (max client-w zoomed-img-w)]
              [virtual-h (max client-h zoomed-img-h)]
-             [scroll-x 0.5] ; TODO
-             [scroll-y 0.5]) ; TODO
-        (send this init-auto-scrollbars virtual-w virtual-h scroll-x scroll-y)
+             [old-virtual-w (/ (* virtual-w old-zoom-factor) zoom-factor)]
+             [old-virtual-h (/ (* virtual-h old-zoom-factor) zoom-factor)]
+             [old-scroll-x (if (> old-virtual-w client-w)
+                               (/ start-x (- old-virtual-w client-w))
+                               0.5)]
+             [old-scroll-y (if (> old-virtual-h client-h)
+                               (/ start-y (- old-virtual-h client-h))
+                               0.5)]
+             [old-pointer-pixel-vx (- (+ start-x mouse-x) (/ virtual-w 2))]
+             [old-pointer-pixel-vy (- (+ start-y mouse-y) (/ virtual-h 2))]
+             [pointer-pixel-vx (* old-pointer-pixel-vx (/ zoom-factor old-zoom-factor))]
+             [pointer-pixel-vy (* old-pointer-pixel-vy (/ zoom-factor old-zoom-factor))]
+             [scroll-x (if (and track-mouse? (> virtual-w client-w))
+                           (+ old-scroll-x (/ (- pointer-pixel-vx old-pointer-pixel-vx) virtual-w))
+                           old-scroll-x)]
+             [scroll-y (if (and track-mouse? (> virtual-h client-h))
+                           (+ old-scroll-y (/ (- pointer-pixel-vy old-pointer-pixel-vy) virtual-h))
+                           old-scroll-y)])
+        (send this init-auto-scrollbars
+              virtual-w virtual-h
+              (clamp-real scroll-x (ivl 0.0 1.0)) (clamp-real scroll-y (ivl 0.0 1.0)))
         (send this show-scrollbars
               (> zoomed-img-w client-w)
               (> zoomed-img-h client-h))))
 
     ; zooms to a specific zoom-factor (1.0 == "no zoom"),
     ; with optional staus bar label override
-    (define/public (zoom-to factor [status-label #f])
+    (define/public (zoom-to factor [status-label #f] #:track-mouse? [track-mouse? #f])
       (set! fit #f) ; always make sure this is cleared when setting a new zoom level
       (define dc (send this get-dc))
+      (define-values [old-scale-x old-scale-y]
+        (send dc get-scale))
       (send dc set-scale factor factor)
-      (configure-scrollbars factor)
+      (configure-scrollbars old-scale-x factor track-mouse?)
       (send this refresh-now)
       (send (status-bar-zoom) set-label
             (cond [status-label status-label]
@@ -164,13 +189,13 @@
                   [else ""])))
 
     ; zooms view by a specified increment (positive or negative)
-    (define/public (zoom-by inc)
+    (define/public (zoom-by inc [track-mouse? #f])
       (define dc (send this get-dc))
       (define-values [cur-scale-x cur-scale-y]
         (send dc get-scale))
       (define new-scale
         (clamp-real (+ cur-scale-x inc) (ivl 0.1 4.0)))
-      (send this zoom-to new-scale))
+      (send this zoom-to new-scale #:track-mouse? track-mouse?))
 
     ; adjusts zoom level so the entire image fits, and at least one dimension
     ; will be the same size as the window.
