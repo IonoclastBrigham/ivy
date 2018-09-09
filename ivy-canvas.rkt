@@ -40,6 +40,7 @@
     
     (define mouse-x 0)
     (define mouse-y 0)
+    (define mouse-left-down #f)
 
     ; whether the last zoom operation was "fit"
     (define fit #f)
@@ -105,8 +106,19 @@
       (case type
         ; track where the mouse is
         [(enter motion)
-         (set! mouse-x (send evt get-x))
-         (set! mouse-y (send evt get-y))]))
+         (define new-x (send evt get-x))
+         (define new-y (send evt get-y))
+         (when mouse-left-down
+           (define delta-x (- new-x mouse-x))
+           (define delta-y (- new-y mouse-y))
+           (send this drag delta-x delta-y))
+         (set! mouse-x new-x)
+         (set! mouse-y new-y)]
+        [(left-down)
+         (set! mouse-left-down #t)]
+        [(left-up)
+         (set! mouse-left-down #f)]
+        [else (printf "~a\n" type)]))
     
     (define/override (on-char key)
       (define type (send key get-key-code))
@@ -235,4 +247,12 @@
 
     (define/public (recenter)
       (define-values [virtual-w virtual-h] (send this get-virtual-size))
-      (recenter-origin virtual-w virtual-h))))
+      (recenter-origin virtual-w virtual-h))
+
+    (define/private (is-draggable)
+
+    (define/private (drag delta-x delta-y)
+      (when (and (not (equal? (image-path) +root-path+))
+                 ())
+        ))
+    ))
